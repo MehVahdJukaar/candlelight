@@ -18,9 +18,9 @@ dependencies {
 
 gradlePlugin {
     plugins {
-        injectGettersPlugin {
-            id = ${"plugin_id"}
-            implementationClass = ${"plugin_class"}
+        candlelightPlugin {
+            id =  project.property("plugin_id")
+            implementationClass =  project.property("plugin_class")
         }
     }
 }
