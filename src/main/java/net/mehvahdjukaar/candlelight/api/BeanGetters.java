@@ -7,4 +7,4 @@ import java.lang.annotation.Target;
 
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)  // Make it visible at runtime
-public @interface GenerateGetters {}
+public @interface BeanGetters {}

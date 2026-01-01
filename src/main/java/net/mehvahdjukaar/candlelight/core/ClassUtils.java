@@ -1,15 +1,17 @@
-package net.mehvahdjukaar.candlelight;
+package net.mehvahdjukaar.candlelight.core;
 
 
-import org.gradle.api.Project;
 import org.objectweb.asm.*;
 
 import java.io.*;
-import java.util.*;
 
 import static org.objectweb.asm.Opcodes.*;
 
-public class CandleLightClassWalker {
+public class ClassUtils {
+
+    public static String toDescriptor(String name) {
+        return "L" + name.replace('.', '/') + ";";
+    }
 
     public static void walkClasses(File dir, ClassFileConsumer c) throws IOException {
         File[] files = dir.listFiles();

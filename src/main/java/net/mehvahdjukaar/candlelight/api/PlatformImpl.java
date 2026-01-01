@@ -7,4 +7,4 @@ import java.lang.annotation.ElementType;
 
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.METHOD)
-public @interface Flavour { }
+public @interface PlatformImpl { }

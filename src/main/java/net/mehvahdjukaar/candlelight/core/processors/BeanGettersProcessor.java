@@ -1,5 +1,6 @@
-package net.mehvahdjukaar.candlelight;
+package net.mehvahdjukaar.candlelight.core.processors;
 
+import net.mehvahdjukaar.candlelight.core.ClassUtils;
 import org.gradle.api.Project;
 import org.objectweb.asm.*;
 
@@ -10,13 +11,13 @@ import java.util.Set;
 
 import static org.objectweb.asm.Opcodes.*;
 
-class GenerateGetterProcessor implements ClassAnnotationProcessor{
+public class BeanGettersProcessor implements ClassProcessor {
 
-    private static final String ANNOTATION_DESC = "Lnet/mehvahdjukaar/candlelight/api/GenerateGetters;";
+    private static final String ANNOTATION_DESC = ClassUtils.toDescriptor("net.mehvahdjukaar.candlelight.api.BeanGetters");
 
     private final Project project;
 
-    public GenerateGetterProcessor(Project project) {
+    public BeanGettersProcessor(Project project) {
         this.project = project;
     }
 
@@ -68,7 +69,7 @@ class GenerateGetterProcessor implements ClassAnnotationProcessor{
                         mv.visitCode();
                         mv.visitVarInsn(ALOAD, 0);
                         mv.visitMethodInsn(INVOKEVIRTUAL, className, m.name(), m.descriptor(), false);
-                        mv.visitInsn(CandleLightClassWalker.getReturnOpcode(m.descriptor()));
+                        mv.visitInsn(ClassUtils.getReturnOpcode(m.descriptor()));
                         mv.visitMaxs(0, 0);
                         mv.visitEnd();
 

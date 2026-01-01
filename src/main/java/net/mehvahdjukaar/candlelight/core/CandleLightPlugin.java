@@ -1,5 +1,8 @@
-package net.mehvahdjukaar.candlelight;
+package net.mehvahdjukaar.candlelight.core;
 
+import net.mehvahdjukaar.candlelight.core.processors.ClassProcessor;
+import net.mehvahdjukaar.candlelight.core.processors.FlavourProcessor;
+import net.mehvahdjukaar.candlelight.core.processors.BeanGettersProcessor;
 import org.gradle.api.GradleException;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
@@ -9,7 +12,6 @@ import org.jetbrains.annotations.ApiStatus;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.List;
 
 @ApiStatus.Internal
@@ -20,6 +22,8 @@ public class CandleLightPlugin implements Plugin<Project> {
         project.getTasks().withType(JavaCompile.class).configureEach(task -> {
             task.doLast(t -> {
                 File classesDir = task.getDestinationDirectory().get().getAsFile();
+
+                project.getLogger().lifecycle("[Candlelight] Scanning classes in: " + classesDir);
 
                 try {
                     if (!classesDir.exists()) {
@@ -36,23 +40,25 @@ public class CandleLightPlugin implements Plugin<Project> {
 
     public void transformAll(File classesDir, Project project) throws IOException {
 
-        List<ClassAnnotationProcessor> ap = List.of(
-                new GenerateGetterProcessor(project),
+        List<ClassProcessor> ap = List.of(
+                new BeanGettersProcessor(project),
                 new FlavourProcessor(project));
 
-        CandleLightClassWalker.walkClasses(classesDir, file -> {
-            byte[] original = CandleLightClassWalker.readAllBytes(file);
+        ClassUtils.walkClasses(classesDir, file -> {
+            //project.getLogger().lifecycle("[Candlelight] Scanning file: " + file.getAbsolutePath());
+
+            byte[] original = ClassUtils.readAllBytes(file);
             byte[] modified = original;
 
-
-            for (ClassAnnotationProcessor processor : ap) {
-                modified = processor.transform(original);
+            for (ClassProcessor processor : ap) {
+                modified = processor.transform(modified);
             }
 
-            if (!Arrays.equals(original, modified)) {
+            if (original != modified) {
                 try (FileOutputStream fos = new FileOutputStream(file)) {
                     fos.write(modified);
                 }
+                project.getLogger().lifecycle("[Candlelight] Class written after modifications: " + file.getAbsolutePath());
             }
         });
     }

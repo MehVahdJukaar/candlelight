@@ -3,8 +3,8 @@ plugins {
     id 'maven-publish'
 }
 
-group = project.property('PLUGIN_GROUP')
-version = project.property('PLUGIN_VERSION')
+group = project.plugin_group
+version = project.plugin_version
 
 repositories {
     mavenLocal()   // to find locally published dependencies if needed
@@ -19,8 +19,8 @@ dependencies {
 gradlePlugin {
     plugins {
         injectGettersPlugin {
-            id = project.property('PLUGIN_ID')
-            implementationClass = id + "." +project.property('PLUGIN_CLASS')
+            id = ${"plugin_id"}
+            implementationClass = ${"plugin_class"}
         }
     }
 }
