@@ -17,26 +17,32 @@ public class CandleLightPlugin implements Plugin<Project> {
             "Lnet/mehvahdjukaar/candlelight/api/GenerateGetters;";
     private static final String ANNO_FLAVOUR =
             "Lnet/mehvahdjukaar/candlelight/api/Flavour;";
-    
+
     private static final String PROPERTY_FLAVOUR = "candlelight.flavour";
+
 
     @Override
     public void apply(Project project) {
-        // IMPORTANT: flavour present => flavoured project, absent => common project
         String flavour = (String) project.findProperty(PROPERTY_FLAVOUR);
-        final boolean isFlavouredProject = flavour != null && !flavour.isBlank();
-        final String flavourName = isFlavouredProject ? flavour : null;
+        boolean isFlavouredProject = flavour != null && !flavour.isBlank();
 
-        project.getTasks().withType(JavaCompile.class).configureEach(compileTask -> {
-            compileTask.doLast(task -> {
-                File classesDir = compileTask.getDestinationDirectory().get().getAsFile();
+        project.getTasks().withType(JavaCompile.class).configureEach(task -> {
+            task.doLast(t -> {
+                File classesDir = task.getDestinationDirectory().get().getAsFile();
+
                 project.getLogger().lifecycle(
-                        "[Candlelight] scanning classes (flavoured=" + isFlavouredProject + "): " + classesDir
+                        "\n[Candlelight] ============================================\n" +
+                                "[Candlelight] Starting class transformation\n" +
+                                "[Candlelight]  Flavoured project : " + isFlavouredProject + "\n" +
+                                "[Candlelight]  Flavour name      : " + flavour + "\n" +
+                                "[Candlelight]  Classes dir       : " + classesDir + "\n" +
+                                "[Candlelight] ============================================\n"
                 );
+
                 try {
-                    transformClasses(classesDir, isFlavouredProject, flavourName, project);
+                    transformClasses(classesDir, isFlavouredProject, flavour, project);
                 } catch (IOException e) {
-                    throw new GradleException("Candlelight plugin failed processing due to I/O error", e);
+                    throw new GradleException("Candlelight I/O failure", e);
                 }
             });
         });
@@ -49,32 +55,59 @@ public class CandleLightPlugin implements Plugin<Project> {
             Project project
     ) throws IOException {
 
-        if (!classesDir.exists()) return;
+        long startNanos = System.nanoTime();
+
+        int totalClasses = 0;
+        int scannedClasses = 0;
+        int flavourClasses = 0;
+        int getterClasses = 0;
+        int modifiedClasses = 0;
+        int flavourMethodsTotal = 0;
 
         List<String> errors = new ArrayList<>();
 
-        walkClasses(classesDir, file -> {
-            byte[] original = readAllBytes(file);
+        if (!classesDir.exists()) {
+            project.getLogger().lifecycle("[Candlelight] Classes directory does not exist");
+            return;
+        }
 
+        walkClasses(classesDir, file -> {
+
+            project.getLogger().lifecycle(
+                    "[Candlelight] Scanning file: " + file.getAbsolutePath()
+            );
+
+            byte[] original = readAllBytes(file);
             ClassScanResult scan;
+
             try {
-                scan = scanClass(original, file, isFlavouredProject);
+                scan = scanClass(original, isFlavouredProject, project);
             } catch (GradleException e) {
                 errors.add(e.getMessage());
                 return;
             }
 
-            // If no getters and no flavour usage, skip entirely
-            if (!scan.hasGenerateGetters && scan.flavourMethods.isEmpty()) return;
+            project.getLogger().lifecycle(
+                    "[Candlelight] Scan result for " + scan.internalName.replace('/', '.') + "\n" +
+                            "  @GenerateGetters : " + scan.hasGenerateGetters + "\n" +
+                            "  @Flavour methods : " + scan.flavourMethods.size()
+            );
+
+            if (!scan.hasGenerateGetters && scan.flavourMethods.isEmpty()) {
+                project.getLogger().lifecycle(
+                        "[Candlelight] No transformations needed for this class"
+                );
+                return;
+            }
 
             String implInternalName = null;
 
             if (!scan.flavourMethods.isEmpty()) {
+
                 if (!isFlavouredProject) {
                     errors.add(
-                            "[Candlelight] @Flavour used in common project.\n" +
-                                    "  Class: " + scan.internalName.replace('/', '.') + "\n" +
-                                    "  File: " + file.getAbsolutePath()
+                            "[Candlelight] @Flavour used in non-flavoured project:\n" +
+                                    "  " + scan.internalName.replace('/', '.')
                     );
                     return;
                 }
@@ -82,29 +115,55 @@ public class CandleLightPlugin implements Plugin<Project> {
                 implInternalName = computeImplInternalName(scan.internalName, flavour);
                 File implFile = new File(classesDir, implInternalName + ".class");
 
+                project.getLogger().lifecycle(
+                        "[Candlelight] FLAVOUR processing\n" +
+                                "  Common class : " + scan.internalName.replace('/', '.') + "\n" +
+                                "  Impl class   : " + implInternalName.replace('/', '.') + "\n" +
+                                "  Impl path    : " + implFile.getAbsolutePath() + "\n" +
+                                "  Exists       : " + implFile.exists()
+                );
+
                 if (!implFile.exists()) {
                     errors.add(
-                            "[Candlelight] Missing flavour implementation.\n" +
-                                    "  Common class: " + scan.internalName.replace('/', '.') + "\n" +
-                                    "  Expected impl: " + implInternalName.replace('/', '.') + "\n" +
-                                    "  Flavour: " + flavour
+                            "[Candlelight] Missing flavour implementation:\n" +
+                                    "  Common class : " + scan.internalName.replace('/', '.') + "\n" +
+                                    "  Expected impl: " + implInternalName.replace('/', '.')
                     );
                     return;
                 }
             }
 
-            byte[] modified = transformClass(original, scan, implInternalName);
+            byte[] modified = transformClass(original, scan, implInternalName, project);
 
             if (!Arrays.equals(original, modified)) {
+                project.getLogger().lifecycle(
+                        "[Candlelight] MODIFIED class written: " +
+                                scan.internalName.replace('/', '.')
+                );
                 try (FileOutputStream fos = new FileOutputStream(file)) {
                     fos.write(modified);
                 }
             }
         });
 
+        long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000;
+
+        project.getLogger().lifecycle(
+                "\n[Candlelight] ============================================\n" +
+                        "[Candlelight] Scan summary\n" +
+                        "[Candlelight]  Total class files     : " + totalClasses + "\n" +
+                        "[Candlelight]  Classes scanned       : " + scannedClasses + "\n" +
+                        "[Candlelight]  Classes w/ @Flavour   : " + flavourClasses + "\n" +
+                        "[Candlelight]  Flavour methods total : " + flavourMethodsTotal + "\n" +
+                        "[Candlelight]  Classes w/ getters    : " + getterClasses + "\n" +
+                        "[Candlelight]  Classes modified      : " + modifiedClasses + "\n" +
+                        "[Candlelight]  Time taken            : " + elapsedMs + " ms\n" +
+                        "[Candlelight] ============================================\n"
+        );
+
         if (!errors.isEmpty()) {
             throw new GradleException(
-                    "[Candlelight] Build failed with " + errors.size() + " error(s):\n\n" +
+                    "[Candlelight] Build failed with errors:\n\n" +
                             String.join("\n\n", errors)
             );
         }
@@ -112,12 +171,11 @@ public class CandleLightPlugin implements Plugin<Project> {
 
     private ClassScanResult scanClass(
             byte[] classBytes,
-            File fileForContext,
-            boolean isFlavouredProject
+            boolean isFlavouredProject,
+            Project project
     ) {
-
-        ClassReader cr = new ClassReader(classBytes);
         ClassScanResult result = new ClassScanResult();
+        ClassReader cr = new ClassReader(classBytes);
 
         cr.accept(new ClassVisitor(Opcodes.ASM9) {
 
@@ -131,31 +189,43 @@ public class CandleLightPlugin implements Plugin<Project> {
             public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
                 if (ANNO_GENERATE_GETTERS.equals(desc)) {
                     result.hasGenerateGetters = true;
+                    project.getLogger().lifecycle(
+                            "[Candlelight] Found @GenerateGetters on " +
+                                    result.internalName.replace('/', '.')
+                    );
                 }
                 return super.visitAnnotation(desc, visible);
             }
 
             @Override
-            public MethodVisitor visitMethod(int access, String name, String descriptor,
-                                             String signature, String[] exceptions) {
+            public MethodVisitor visitMethod(int access, String name, String desc,
+                                             String sig, String[] ex) {
 
                 result.existingMethods.add(name);
 
-                if ((access & Opcodes.ACC_STATIC) == 0
-                        && !name.equals("<init>")
-                        && descriptor.startsWith("()")
-                        && Type.getReturnType(descriptor).getSort() != Type.VOID) {
-                    result.getterCandidates.add(new MethodData(name, descriptor));
+                if ((access & Opcodes.ACC_STATIC) == 0 &&
+                        !name.equals("<init>") &&
+                        desc.startsWith("()") &&
+                        Type.getReturnType(desc).getSort() != Type.VOID) {
+                    result.getterCandidates.add(new MethodData(name, desc));
                 }
 
-                MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
+                MethodVisitor mv = super.visitMethod(access, name, desc, sig, ex);
+
                 return new MethodVisitor(Opcodes.ASM9, mv) {
-                    boolean hasFlavour = false;
+                    boolean hasFlavour;
 
                     @Override
-                    public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
-                        if (ANNO_FLAVOUR.equals(desc)) hasFlavour = true;
-                        return super.visitAnnotation(desc, visible);
+                    public AnnotationVisitor visitAnnotation(String aDesc, boolean vis) {
+                        if (ANNO_FLAVOUR.equals(aDesc)) {
+                            hasFlavour = true;
+                            project.getLogger().lifecycle(
+                                    "[Candlelight] Found @Flavour method: " +
+                                            result.internalName.replace('/', '.') +
+                                            "#" + name + desc
+                            );
+                        }
+                        return super.visitAnnotation(aDesc, vis);
                     }
 
                     @Override
@@ -165,12 +235,18 @@ public class CandleLightPlugin implements Plugin<Project> {
                                 throw new GradleException(
                                         "[Candlelight] @Flavour method must be static:\n" +
                                                 "  " + result.internalName.replace('/', '.') +
-                                                "#" + name + descriptor
+                                                "#" + name + desc
                                 );
                             }
-                            if (isFlavouredProject) {
-                                result.flavourMethods.add(new MethodData(name, descriptor));
-                            }
+
+                            // ALWAYS record it
+                            result.flavourMethods.add(new MethodData(name, desc));
+
+                            project.getLogger().lifecycle(
+                                    "[Candlelight] Registered @Flavour method: " +
+                                            result.internalName.replace('/', '.') +
+                                            "#" + name + desc
+                            );
                         }
                         super.visitEnd();
                     }
@@ -182,27 +258,36 @@ public class CandleLightPlugin implements Plugin<Project> {
     }
 
     private byte[] transformClass(
-            byte[] originalBytes,
+            byte[] original,
             ClassScanResult scan,
-            String implInternalName
+            String implInternalName,
+            Project project
     ) {
 
-        ClassReader cr = new ClassReader(originalBytes);
+        ClassReader cr = new ClassReader(original);
         ClassWriter cw = new ClassWriter(cr, ClassWriter.COMPUTE_MAXS);
         boolean[] modified = {false};
 
         cr.accept(new ClassVisitor(Opcodes.ASM9, cw) {
 
             @Override
-            public MethodVisitor visitMethod(int access, String name, String descriptor,
-                                             String signature, String[] exceptions) {
+            public MethodVisitor visitMethod(int access, String name, String desc,
+                                             String sig, String[] ex) {
 
-                if (containsMethod(scan.flavourMethods, name, descriptor)) {
+                if (containsMethod(scan.flavourMethods, name, desc)) {
                     modified[0] = true;
-                    MethodVisitor mv = cv.visitMethod(access, name, descriptor, signature, exceptions);
+
+                    project.getLogger().lifecycle(
+                            "[Candlelight] Rewriting @Flavour method:\n" +
+                                    "  class  : " + scan.internalName.replace('/', '.') + "\n" +
+                                    "  method : " + name + desc + "\n" +
+                                    "  target : " + implInternalName.replace('/', '.')
+                    );
+
+                    MethodVisitor mv = cv.visitMethod(access, name, desc, sig, ex);
                     mv.visitCode();
 
-                    Type[] args = Type.getArgumentTypes(descriptor);
+                    Type[] args = Type.getArgumentTypes(desc);
                     int idx = 0;
                     for (Type t : args) {
                         mv.visitVarInsn(t.getOpcode(Opcodes.ILOAD), idx);
@@ -213,25 +298,31 @@ public class CandleLightPlugin implements Plugin<Project> {
                             Opcodes.INVOKESTATIC,
                             implInternalName,
                             name,
-                            descriptor,
+                            desc,
                             false
                     );
 
-                    mv.visitInsn(getReturnOpcode(descriptor));
+                    mv.visitInsn(getReturnOpcode(desc));
                     mv.visitMaxs(0, 0);
                     mv.visitEnd();
                     return null;
                 }
 
-                return super.visitMethod(access, name, descriptor, signature, exceptions);
+                return super.visitMethod(access, name, desc, sig, ex);
             }
 
             @Override
             public void visitEnd() {
                 if (scan.hasGenerateGetters) {
+                    project.getLogger().lifecycle(
+                            "[Candlelight] Generating getters for " +
+                                    scan.internalName.replace('/', '.')
+                    );
+
                     for (MethodData m : scan.getterCandidates) {
                         String getter = "get" + Character.toUpperCase(m.name.charAt(0))
                                 + m.name.substring(1);
+
                         if (scan.existingMethods.contains(getter)) continue;
 
                         MethodVisitor mv = cv.visitMethod(
@@ -253,6 +344,11 @@ public class CandleLightPlugin implements Plugin<Project> {
                         mv.visitInsn(getReturnOpcode(m.descriptor));
                         mv.visitMaxs(0, 0);
                         mv.visitEnd();
+
+                        project.getLogger().lifecycle(
+                                "[Candlelight]  + generated getter: " + getter
+                        );
+
                         modified[0] = true;
                     }
                 }
@@ -260,10 +356,10 @@ public class CandleLightPlugin implements Plugin<Project> {
             }
         }, 0);
 
-        return modified[0] ? cw.toByteArray() : originalBytes;
+        return modified[0] ? cw.toByteArray() : original;
     }
 
-    /* ---- helpers unchanged ---- */
+    /* ---- helpers ---- */
 
     private static boolean containsMethod(List<MethodData> list, String name, String desc) {
         return list.stream().anyMatch(m -> m.name.equals(name) && m.descriptor.equals(desc));
