@@ -1,4 +1,4 @@
-package net.mehvahdjukaar.candle.api;
+package net.mehvahdjukaar.candlelight.api;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
