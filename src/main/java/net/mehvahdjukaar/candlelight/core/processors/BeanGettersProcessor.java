@@ -8,13 +8,20 @@ import java.util.*;
 
 import static org.objectweb.asm.Opcodes.*;
 
+import org.objectweb.asm.*;
+
+import java.util.*;
+
 public class BeanGettersProcessor implements ClassProcessor {
 
     private static final String ANNOTATION_DESC =
-            ClassUtils.toDescriptor("net.mehvahdjukaar.candlelight.api.BeanGetters");
+            ClassUtils.toDescriptor("net.mehvahdjukaar.candlelight.api.BeanGettersAliases");
 
     private static final String NO_ALIAS_DESC =
-            ClassUtils.toDescriptor("net.mehvahdjukaar.candlelight.api.NoAlias");
+            ClassUtils.toDescriptor("net.mehvahdjukaar.candlelight.api.NoGetterAlias");
+
+    private static final String GETTER_ALIAS_DESC =
+            ClassUtils.toDescriptor("net.mehvahdjukaar.candlelight.api.GetterAlias");
 
     private final Project project;
 
@@ -54,28 +61,41 @@ public class BeanGettersProcessor implements ClassProcessor {
                                              String signature, String[] exceptions) {
                 existingMethods.add(name);
 
+                // Only process methods that start with a lowercase letter
                 if (!name.matches("[a-z].*")) {
                     return super.visitMethod(access, name, descriptor, signature, exceptions);
                 }
 
-                MethodData data = new MethodData(name, descriptor, access);
+                MethodData data = new MethodData(name, descriptor, access, null);
 
                 MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
                 return new MethodVisitor(ASM9, mv) {
                     private boolean noAlias = false;
+                    private String aliasPrefix = null;
 
                     @Override
                     public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
                         if (NO_ALIAS_DESC.equals(desc)) {
                             noAlias = true;
+                        } else if (GETTER_ALIAS_DESC.equals(desc)) {
+                            return new AnnotationVisitor(ASM9, super.visitAnnotation(desc, visible)) {
+                                @Override
+                                public void visit(String name, Object value) {
+                                    if ("value".equals(name) && value instanceof String) {
+                                        aliasPrefix = (String) value;
+                                    }
+                                    super.visit(name, value);
+                                }
+                            };
                         }
                         return super.visitAnnotation(desc, visible);
                     }
 
                     @Override
                     public void visitEnd() {
-                        if (!noAlias) {
-                            candidates.add(data);
+                        // Skip candidates marked NoAlias or that start with "has" followed by uppercase
+                        if (!noAlias && !data.name.matches("has[A-Z].*")) {
+                            candidates.add(new MethodData(data.name, data.descriptor, data.access, aliasPrefix));
                         }
                         super.visitEnd();
                     }
@@ -97,7 +117,10 @@ public class BeanGettersProcessor implements ClassProcessor {
                     Type returnType = Type.getReturnType(m.descriptor);
                     boolean isBoolean = returnType.getSort() == Type.BOOLEAN;
 
-                    String prefix = isBoolean ? "is" : "get";
+                    // Use @GetterAlias if present, otherwise default
+                    String prefix = m.aliasPrefix != null ? m.aliasPrefix : (isBoolean ? "is" : "get");
+
+
                     String alias =
                             prefix + Character.toUpperCase(m.name.charAt(0)) + m.name.substring(1);
 
@@ -154,10 +177,10 @@ public class BeanGettersProcessor implements ClassProcessor {
         return modified[0] ? cw.toByteArray() : classBytes;
     }
 
-    private record MethodData(String name, String descriptor, int access) {
-
+    // Updated MethodData with aliasPrefix
+    private record MethodData(String name, String descriptor, int access, String aliasPrefix) {
         boolean isStatic() {
-                return (access & ACC_STATIC) != 0;
-            }
+            return (access & ACC_STATIC) != 0;
         }
+    }
 }
