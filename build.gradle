@@ -1,4 +1,5 @@
 plugins {
+    id 'java'
     id 'java-gradle-plugin'
     id 'maven-publish'
 }
@@ -9,11 +10,24 @@ version = project.plugin_version
 repositories {
     mavenLocal()   // to find locally published dependencies if needed
     mavenCentral()
+
+    maven {
+        name = "NeoForge"
+        url = 'https://maven.neoforged.net/releases'
+    }
 }
 
 dependencies {
     implementation 'org.ow2.asm:asm:9.5'
     implementation 'org.ow2.asm:asm-commons:9.5'
+
+
+    implementation("net.neoforged:srgutils:1.0.11")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.0") // JUnit 5
+}
+
+test {
+    useJUnitPlatform()
 }
 
 gradlePlugin {

@@ -8,10 +8,6 @@ import java.util.*;
 
 import static org.objectweb.asm.Opcodes.*;
 
-import org.objectweb.asm.*;
-
-import java.util.*;
-
 public class BeanGettersProcessor implements ClassProcessor {
 
     private static final String ANNOTATION_DESC =
@@ -61,10 +57,13 @@ public class BeanGettersProcessor implements ClassProcessor {
                                              String signature, String[] exceptions) {
                 existingMethods.add(name);
 
-                // Only process methods that start with a lowercase letter
-                if (!name.matches("[a-z].*")) {
+                // Only public, non-synthetic methods starting with lowercase
+                if ((access & ACC_PUBLIC) == 0
+                        || (access & (ACC_SYNTHETIC | ACC_BRIDGE)) != 0
+                        || !name.matches("[a-z].*")) {
                     return super.visitMethod(access, name, descriptor, signature, exceptions);
                 }
+
 
                 MethodData data = new MethodData(name, descriptor, access, null);
 
@@ -93,8 +92,8 @@ public class BeanGettersProcessor implements ClassProcessor {
 
                     @Override
                     public void visitEnd() {
-                        // Skip candidates marked NoAlias or that start with "has" followed by uppercase
-                        if (!noAlias && !data.name.matches("has[A-Z].*")) {
+                        // Skip candidates marked NoAlias or that start with "has", "can", "get", "is" followed by uppercase
+                        if (!noAlias && !data.name.matches("(has|can|get|is)[A-Z].*")) {
                             candidates.add(new MethodData(data.name, data.descriptor, data.access, aliasPrefix));
                         }
                         super.visitEnd();
@@ -120,10 +119,12 @@ public class BeanGettersProcessor implements ClassProcessor {
                     // Use @GetterAlias if present, otherwise default
                     String prefix = m.aliasPrefix != null ? m.aliasPrefix : (isBoolean ? "is" : "get");
 
+                    // Capitalize first letter of base name
+                    String baseName = Character.toUpperCase(m.name.charAt(0)) + m.name.substring(1);
 
-                    String alias =
-                            prefix + Character.toUpperCase(m.name.charAt(0)) + m.name.substring(1);
+                    String alias = prefix + baseName;
 
+                    // Skip if method already exists
                     if (existingMethods.contains(alias)) continue;
 
                     MethodVisitor mv = cv.visitMethod(
@@ -177,7 +178,6 @@ public class BeanGettersProcessor implements ClassProcessor {
         return modified[0] ? cw.toByteArray() : classBytes;
     }
 
-    // Updated MethodData with aliasPrefix
     private record MethodData(String name, String descriptor, int access, String aliasPrefix) {
         boolean isStatic() {
             return (access & ACC_STATIC) != 0;
