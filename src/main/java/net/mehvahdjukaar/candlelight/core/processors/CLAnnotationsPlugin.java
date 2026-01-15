@@ -1,6 +1,7 @@
 package net.mehvahdjukaar.candlelight.core.processors;
 
 import net.mehvahdjukaar.candlelight.core.ClassUtils;
+import net.mehvahdjukaar.candlelight.core.CandleLightExtension;
 import org.gradle.api.GradleException;
 import org.gradle.api.Project;
 import org.gradle.api.tasks.compile.JavaCompile;
@@ -14,7 +15,7 @@ import java.util.List;
 @ApiStatus.Internal
 public class CLAnnotationsPlugin {
 
-    public static void apply(Project project) {
+    public static void apply(Project project, CandleLightExtension extension) {
         project.getTasks().withType(JavaCompile.class).configureEach(task -> {
             task.doLast(t -> {
                 File classesDir = task.getDestinationDirectory().get().getAsFile();

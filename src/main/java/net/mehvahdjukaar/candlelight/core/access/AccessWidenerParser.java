@@ -11,8 +11,6 @@ import java.util.stream.Collectors;
 
 public final class AccessWidenerParser {
 
-    private AccessWidenerParser() {}
-
     static String trimComments(String value) {
         int index = value.indexOf('#');
         return index == -1 ? value : value.substring(0, index);

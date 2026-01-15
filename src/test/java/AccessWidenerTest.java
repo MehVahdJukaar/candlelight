@@ -1,7 +1,6 @@
 import net.mehvahdjukaar.candlelight.core.access.AccessWidener;
 import net.mehvahdjukaar.candlelight.core.access.AccessWidenerParser;
-import net.mehvahdjukaar.candlelight.core.access.AccessWidenerUtils;
-import net.mehvahdjukaar.candlelight.core.access.Remapper;
+import net.mehvahdjukaar.candlelight.core.access.AccessWidenerConverter;
 import org.gradle.api.Project;
 import org.junit.jupiter.api.Test;
 
@@ -30,7 +29,7 @@ public class AccessWidenerTest {
         File awFile = new File(project.getProjectDir(), "aw/simple.accesswidener");
         AccessWidener aw = AccessWidenerParser.parseAccessWidener(awFile);
 
-        String transformed = AccessWidenerUtils.toAccessTransformer(aw, Remapper.empty(null));
+        String transformed = AccessWidenerConverter.toAccessTransformer(aw);
 
         assertNotNull(transformed, "Transformed output should not be null");
         System.out.println(transformed); // optional: inspect output
