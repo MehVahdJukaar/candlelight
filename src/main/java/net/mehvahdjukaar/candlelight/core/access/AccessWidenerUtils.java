@@ -4,11 +4,9 @@ import org.jetbrains.annotations.VisibleForTesting;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 public final class AccessWidenerUtils {
 
-    private AccessWidenerUtils() {}
 
     static String transform(AccessWidener.Modifier modifier) {
         return switch (modifier) {
@@ -23,7 +21,7 @@ public final class AccessWidenerUtils {
     }
 
     @VisibleForTesting
-   public static String toAccessTransformer(AccessWidener widener, Remapper remapper) {
+    public static String toAccessTransformer(AccessWidener widener, Remapper remapper) {
         if (remapper == null) {
             remapper = Remapper.empty(null);
         }

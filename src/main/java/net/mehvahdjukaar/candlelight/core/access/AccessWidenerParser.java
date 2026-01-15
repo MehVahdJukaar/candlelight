@@ -33,7 +33,6 @@ public final class AccessWidenerParser {
             case FIELD -> new AccessWidener.FieldEntry(
                     modifier, className, statements.get(3), statements.get(4)
             );
-            default -> throw new IllegalStateException("Unexpected target: " + target);
         };
     }
 
