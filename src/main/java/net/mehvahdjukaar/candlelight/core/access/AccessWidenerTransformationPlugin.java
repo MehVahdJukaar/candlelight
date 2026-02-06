@@ -22,8 +22,12 @@ public final class AccessWidenerTransformationPlugin {
 
         // Defer task registration until after project evaluation (so extension values are set)
         project.afterEvaluate(p -> {
-            Provider<File> inputFile = extension.getAccessWideners().map(RegularFile::getAsFile);
-            registerTransformTask(project, inputFile);
+            if (extension.getAccessWideners().isPresent()) {
+                registerTransformTask(
+                        project,
+                        extension.getAccessWideners().map(RegularFile::getAsFile)
+                );
+            }
         });
     }
 
@@ -79,15 +83,18 @@ public final class AccessWidenerTransformationPlugin {
         }
 
         // After the transform task is registered
-        project.getTasks()
-                .withType(ProcessResources.class)
-                .configureEach(task -> {
-                    task.dependsOn(transformAWTask);
-                    task.from(transformAWTask, spec -> {
-                        spec.rename(name -> "accesstransformer.cfg"); // force correct name
-                        spec.into("META-INF");                        // copy into META-INF
-                    });
-                });
+        project.getRootProject().getAllprojects()
+                .forEach(p -> p
+                        .getTasks()
+                        .withType(ProcessResources.class)
+                        .configureEach(task -> {
+                            task.dependsOn(transformAWTask);
+                            task.from(transformAWTask, spec -> {
+                                spec.rename(name -> "accesstransformer.cfg"); // force correct name
+                                spec.into("META-INF");                        // copy into META-INF
+                            });
+                        }));
+
 
         return transformAWTask;
     }

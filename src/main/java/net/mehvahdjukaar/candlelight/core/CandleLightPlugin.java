@@ -3,6 +3,7 @@ package net.mehvahdjukaar.candlelight.core;
 import net.mehvahdjukaar.candlelight.core.access.AccessWidenerTransformationPlugin;
 import net.mehvahdjukaar.candlelight.core.env.ClientOnlyTransformPlugin;
 import net.mehvahdjukaar.candlelight.core.processors.CLAnnotationsPlugin;
+import net.mehvahdjukaar.candlelight.core.tags.ConventionalTagTransformerPlugin;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 
@@ -15,7 +16,8 @@ public class CandleLightPlugin implements Plugin<Project> {
 
         CLAnnotationsPlugin.apply(project, extension);
         AccessWidenerTransformationPlugin.apply(project, extension);
-        ClientOnlyTransformPlugin.apply(project, extension);
+        ClientOnlyTransformPlugin.apply(project);
+        //ConventionalTagTransformerPlugin.apply(project);
 
     }
 }

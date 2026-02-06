@@ -2,7 +2,6 @@ package net.mehvahdjukaar.candlelight.core.env;
 
 import org.gradle.api.Project;
 import org.gradle.api.tasks.bundling.Jar;
-import org.gradle.api.tasks.TaskProvider;
 import org.objectweb.asm.*;
 
 import java.io.File;
@@ -12,17 +11,22 @@ import java.nio.file.StandardOpenOption;
 
 public class ClientOnlyTransformPlugin {
 
-    private static final String NEUTRAL_ANNOTATION = "Lnet/mehvahdjukaar/candlelight/api/ClientOnly;";
+    private static final String CLIENT_ONLY = "Lnet/mehvahdjukaar/candlelight/api/ClientOnly;";
 
     private enum LoaderType {
-        FABRIC("net.fabricmc.api.Environment"),
-        FORGE("net.minecraftforge.api.distmarker.OnlyIn"),
-        NEOFORGE("net.neoforged.api.distmarker.OnlyIn");
+        FABRIC("net.fabricmc.api.EnvType",
+                "net.fabricmc.api.Environment"),
+        FORGE("net.minecraftforge.api.distmarker.Dist",
+                "net.minecraftforge.api.distmarker.OnlyIn"),
+        NEOFORGE("net.neoforged.api.distmarker.Dist",
+                "net.neoforged.api.distmarker.OnlyIn");
 
-        final String desc;
+        final String valueDesc; // type of parameter for annotation
+        final String annotationDesc; // annotation class descriptor
 
-        LoaderType(String className) {
-            this.desc = "L" + className.replace('.', '/') + ";";
+        LoaderType(String valueClass, String annotationClass) {
+            this.valueDesc = "L" + valueClass.replace('.', '/') + ";";
+            this.annotationDesc = "L" + annotationClass.replace('.', '/') + ";";
         }
 
         static LoaderType infer(String projectName) {
@@ -35,41 +39,31 @@ public class ClientOnlyTransformPlugin {
     }
 
     public static void apply(Project rootProject) {
-        System.out.println("[ClientOnlyTransformPlugin] Applying to root project: " + rootProject.getName());
-
-        rootProject.getAllprojects().forEach(project -> {
-            System.out.println("[ClientOnlyTransformPlugin] Configuring project: " + project.getName());
-
+        // Apply to all subprojects
+        rootProject.getRootProject().getAllprojects().forEach(project -> {
             project.getTasks().withType(Jar.class).configureEach(jar -> {
-
-                // Ensure classes task runs first
-                jar.dependsOn(project.getTasks().findByName("classes"));
+                // Only transform the main JAR
+                if (!jar.getName().equals("jar") && !jar.getName().equals("remapJar")) return;
+                System.out.println("[ClientOnlyTransformPlugin] Setting up transformation for project " + project.getName());
 
                 jar.doFirst(task -> {
-                    System.out.println("[ClientOnlyTransformPlugin] Running doFirst for JAR: " + jar.getName());
-
                     LoaderType loader = LoaderType.infer(project.getName());
                     if (loader == null) {
-                        System.out.println("[ClientOnlyTransformPlugin] No loader detected for project: " + project.getName());
+                        System.out.println("[ClientOnlyTransformPlugin] Unknown loader for project " + project.getName() + ", skipping");
                         return;
                     }
-
-                    System.out.println("[ClientOnlyTransformPlugin] Detected loader: " + loader);
 
                     File classesDir = new File(project.getBuildDir(), "classes/java/main");
                     if (!classesDir.exists()) {
-                        System.out.println("[ClientOnlyTransformPlugin] Classes directory does not exist: " + classesDir.getAbsolutePath());
+                        System.out.println("[ClientOnlyTransformPlugin] No classes dir for project " + project.getName());
                         return;
                     }
-                    System.out.println("[ClientOnlyTransformPlugin] Classes directory: " + classesDir.getAbsolutePath());
 
+                    System.out.println("[ClientOnlyTransformPlugin] Transforming classes for loader: " + loader.name());
                     try {
                         transformClasses(classesDir.toPath(), loader);
-                        System.out.println("[ClientOnlyTransformPlugin] Transformation complete for project: " + project.getName());
                     } catch (Exception e) {
-                        System.err.println("[ClientOnlyTransformPlugin] Failed to transform classes for project: " + project.getName());
-                        e.printStackTrace();
-                        throw new RuntimeException(e);
+                        throw new RuntimeException("Failed to transform ClientOnly annotations", e);
                     }
                 });
             });
@@ -80,8 +74,6 @@ public class ClientOnlyTransformPlugin {
         Files.walk(dir)
                 .filter(p -> p.toString().endsWith(".class"))
                 .forEach(classFile -> {
-                    System.out.println("[ClientOnlyTransformPlugin] Transforming class file: " + classFile);
-
                     try {
                         byte[] original = Files.readAllBytes(classFile);
                         ClassReader reader = new ClassReader(original);
@@ -90,13 +82,23 @@ public class ClientOnlyTransformPlugin {
                         ClassVisitor visitor = new ClassVisitor(Opcodes.ASM9, writer) {
 
                             @Override
-                            public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
-                                if (NEUTRAL_ANNOTATION.equals(descriptor)) {
-                                    System.out.println("[ClientOnlyTransformPlugin] Replacing class annotation: " + descriptor + " -> " + loader.desc);
-                                    return super.visitAnnotation(loader.desc, visible);
+                            public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
+                                if (CLIENT_ONLY.equals(desc)) {
+                                    System.out.println("[ClientOnlyTransformPlugin] Replacing @ClientOnly with " + loader.annotationDesc + " on class");
+
+                                    AnnotationVisitor av = super.visitAnnotation(loader.annotationDesc, visible);
+                                    if (loader == LoaderType.FABRIC) {
+                                        // Fabric: @Environment(EnvType.CLIENT)
+                                        av.visitEnum("value", "Lnet/fabricmc/api/EnvType;", "CLIENT");
+                                    } else {
+                                        // Forge/NeoForge: @OnlyIn(Dist.CLIENT)
+                                        av.visitEnum("value", "Lnet/minecraftforge/api/distmarker/Dist;", "CLIENT");
+                                    }
+                                    return av;
                                 }
-                                return super.visitAnnotation(descriptor, visible);
+                                return super.visitAnnotation(desc, visible);
                             }
+
 
                             @Override
                             public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
@@ -104,12 +106,22 @@ public class ClientOnlyTransformPlugin {
                                 return new MethodVisitor(Opcodes.ASM9, mv) {
                                     @Override
                                     public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
-                                        if (NEUTRAL_ANNOTATION.equals(desc)) {
-                                            System.out.println("[ClientOnlyTransformPlugin] Replacing method annotation in " + name + ": " + desc + " -> " + loader.desc);
-                                            return super.visitAnnotation(loader.desc, visible);
+                                        if (CLIENT_ONLY.equals(desc)) {
+                                            System.out.println("[ClientOnlyTransformPlugin] Replacing @ClientOnly with " + loader.annotationDesc + " on class");
+
+                                            AnnotationVisitor av = super.visitAnnotation(loader.annotationDesc, visible);
+                                            if (loader == LoaderType.FABRIC) {
+                                                // Fabric: @Environment(EnvType.CLIENT)
+                                                av.visitEnum("value", "Lnet/fabricmc/api/EnvType;", "CLIENT");
+                                            } else {
+                                                // Forge/NeoForge: @OnlyIn(Dist.CLIENT)
+                                                av.visitEnum("value", "Lnet/minecraftforge/api/distmarker/Dist;", "CLIENT");
+                                            }
+                                            return av;
                                         }
                                         return super.visitAnnotation(desc, visible);
                                     }
+
                                 };
                             }
 
@@ -119,12 +131,22 @@ public class ClientOnlyTransformPlugin {
                                 return new FieldVisitor(Opcodes.ASM9, fv) {
                                     @Override
                                     public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
-                                        if (NEUTRAL_ANNOTATION.equals(desc)) {
-                                            System.out.println("[ClientOnlyTransformPlugin] Replacing field annotation in " + name + ": " + desc + " -> " + loader.desc);
-                                            return super.visitAnnotation(loader.desc, visible);
+                                        if (CLIENT_ONLY.equals(desc)) {
+                                            System.out.println("[ClientOnlyTransformPlugin] Replacing @ClientOnly with " + loader.annotationDesc + " on class");
+
+                                            AnnotationVisitor av = super.visitAnnotation(loader.annotationDesc, visible);
+                                            if (loader == LoaderType.FABRIC) {
+                                                // Fabric: @Environment(EnvType.CLIENT)
+                                                av.visitEnum("value", "Lnet/fabricmc/api/EnvType;", "CLIENT");
+                                            } else {
+                                                // Forge/NeoForge: @OnlyIn(Dist.CLIENT)
+                                                av.visitEnum("value", "Lnet/minecraftforge/api/distmarker/Dist;", "CLIENT");
+                                            }
+                                            return av;
                                         }
                                         return super.visitAnnotation(desc, visible);
                                     }
+
                                 };
                             }
                         };
@@ -132,10 +154,8 @@ public class ClientOnlyTransformPlugin {
                         reader.accept(visitor, 0);
                         byte[] transformed = writer.toByteArray();
                         Files.write(classFile, transformed, StandardOpenOption.TRUNCATE_EXISTING);
-
                     } catch (Exception e) {
-                        System.err.println("[ClientOnlyTransformPlugin] Error transforming class: " + classFile);
-                        throw new RuntimeException(e);
+                        throw new RuntimeException("Failed to transform class: " + classFile, e);
                     }
                 });
     }

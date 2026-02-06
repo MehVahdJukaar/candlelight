@@ -8,20 +8,20 @@ import java.util.*;
 
 import static org.objectweb.asm.Opcodes.*;
 
-public class BeanGettersProcessor implements ClassProcessor {
+public class BeanConventionProcessor implements ClassProcessor {
 
     private static final String ANNOTATION_DESC =
-            ClassUtils.toDescriptor("net.mehvahdjukaar.candlelight.api.BeanGettersAliases");
+            ClassUtils.toDescriptor("net.mehvahdjukaar.candlelight.api.BeanAliases");
 
     private static final String NO_ALIAS_DESC =
-            ClassUtils.toDescriptor("net.mehvahdjukaar.candlelight.api.NoGetterAlias");
+            ClassUtils.toDescriptor("net.mehvahdjukaar.candlelight.api.NoBeanAlias");
 
-    private static final String GETTER_ALIAS_DESC =
-            ClassUtils.toDescriptor("net.mehvahdjukaar.candlelight.api.GetterAlias");
+    private static final String BEAN_ALIAS_DESC =
+            ClassUtils.toDescriptor("net.mehvahdjukaar.candlelight.api.BeanAlias");
 
     private final Project project;
 
-    public BeanGettersProcessor(Project project) {
+    public BeanConventionProcessor(Project project) {
         this.project = project;
     }
 
@@ -76,7 +76,7 @@ public class BeanGettersProcessor implements ClassProcessor {
                     public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
                         if (NO_ALIAS_DESC.equals(desc)) {
                             noAlias = true;
-                        } else if (GETTER_ALIAS_DESC.equals(desc)) {
+                        } else if (BEAN_ALIAS_DESC.equals(desc)) {
                             return new AnnotationVisitor(ASM9, super.visitAnnotation(desc, visible)) {
                                 @Override
                                 public void visit(String name, Object value) {
@@ -113,18 +113,28 @@ public class BeanGettersProcessor implements ClassProcessor {
                 );
 
                 for (MethodData m : candidates) {
+
                     Type returnType = Type.getReturnType(m.descriptor);
-                    boolean isBoolean = returnType.getSort() == Type.BOOLEAN;
+                    Type[] args = Type.getArgumentTypes(m.descriptor);
 
-                    // Use @GetterAlias if present, otherwise default
-                    String prefix = m.aliasPrefix != null ? m.aliasPrefix : (isBoolean ? "is" : "get");
+                    boolean isGetter = args.length == 0 && returnType.getSort() != Type.VOID;
+                    boolean isSetter = args.length == 1 && returnType.getSort() == Type.VOID;
 
-                    // Capitalize first letter of base name
+                    if (!isGetter && !isSetter) continue;
+
+                    String prefix;
+                    if (m.aliasPrefix != null) {
+                        prefix = m.aliasPrefix;
+                    } else if (isGetter) {
+                        prefix = returnType.getSort() == Type.BOOLEAN ? "is" : "get";
+                    } else {
+                        prefix = "set";
+                    }
+
                     String baseName = Character.toUpperCase(m.name.charAt(0)) + m.name.substring(1);
-
                     String alias = prefix + baseName;
 
-                    // Skip if method already exists
+                    // Skip if alias already exists
                     if (existingMethods.contains(alias)) continue;
 
                     MethodVisitor mv = cv.visitMethod(
@@ -139,13 +149,11 @@ public class BeanGettersProcessor implements ClassProcessor {
 
                     int localIndex = 0;
 
-                    // load `this` if instance method
                     if (!m.isStatic()) {
                         mv.visitVarInsn(ALOAD, localIndex++);
                     }
 
-                    // load all arguments
-                    for (Type arg : Type.getArgumentTypes(m.descriptor)) {
+                    for (Type arg : args) {
                         mv.visitVarInsn(arg.getOpcode(ILOAD), localIndex);
                         localIndex += arg.getSize();
                     }
@@ -165,8 +173,10 @@ public class BeanGettersProcessor implements ClassProcessor {
                     mv.visitEnd();
 
                     project.getLogger().lifecycle(
-                            "[Candlelight]  + generated getter: " + alias
+                            "[Candlelight]  + generated " +
+                                    (isGetter ? "getter" : "setter") + ": " + alias
                     );
+
                     modified[0] = true;
                 }
 

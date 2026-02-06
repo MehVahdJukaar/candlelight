@@ -38,7 +38,7 @@ public class CLAnnotationsPlugin {
     public static void transformAll(File classesDir, Project project) throws IOException {
 
         List<ClassProcessor> ap = List.of(
-                new BeanGettersProcessor(project),
+                new BeanConventionProcessor(project),
                 new FlavourProcessor(project));
 
         ClassUtils.walkClasses(classesDir, file -> {
