@@ -21,7 +21,7 @@ public class CLAnnotationsPlugin {
 
     private static final List<ClassProcessor> PROCESSORS = List.of(
             new BeanConventionProcessor(),
-            //new OptionalInterfaceProcessor(),
+            new OptionalInterfaceProcessor(),
             new PlatImplProcessor()
     );
 

@@ -38,7 +38,7 @@ public class PlatImplProcessor implements ClassProcessor {
                     public AnnotationVisitor visitAnnotation(String annotationDesc, boolean visible) {
                         if (FLAVOUR_ANNOTATION_DESC.equals(annotationDesc)) {
                             isFlavour = true;
-                            CandleLightPlugin.log(project,"  Found @PlatformImpl method: " +
+                            CandleLightPlugin.log(project," Found @PlatformImpl method: " +
                                     className.replace('/', '.') + "#" + name + desc);
                         }
                         return super.visitAnnotation(annotationDesc, visible);

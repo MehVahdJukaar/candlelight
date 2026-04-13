@@ -15,103 +15,87 @@ public class OptionalInterfaceProcessor implements ClassProcessor {
 
     @Override
     public byte[] transform(byte[] input, Project project, CandleLightExtension ext) {
-
         ClassReader reader = new ClassReader(input);
-        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
 
-        ClassVisitor visitor = new ClassVisitor(Opcodes.ASM9, writer) {
+        // We use a 1-element array so the anonymous inner class can modify it
+        final String[] foundInterface = { null };
 
-            private String iface;
-            private String className;
-            private boolean annotated = false;
-            private boolean modified = false;
-
+        // Pass 1: Scan for the @OptionalInterface annotation
+        reader.accept(new ClassVisitor(Opcodes.ASM9) {
             @Override
-            public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
-
-                if (ANNOTATION_DESC.equals(desc)) {
-                    annotated = true;
-
-                    CandleLightPlugin.log(project,
-                                " OptionalInterface found on " + className);
-
+            public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
+                if (ANNOTATION_DESC.equals(descriptor)) {
                     return new AnnotationVisitor(Opcodes.ASM9) {
                         @Override
                         public void visit(String name, Object value) {
-                            iface = String.valueOf(value);
-
-                            CandleLightPlugin.log(project,
-                                    "  → target interface: " + iface);
+                            if ("value".equals(name) && value instanceof String strValue) {
+                                foundInterface[0] = strValue.replace('.', '/');
+                            }
+                            super.visit(name, value);
                         }
                     };
                 }
-
-                return super.visitAnnotation(desc, visible);
+                return null;
             }
+        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
 
-            @Override
-            public void visit(int version,
-                              int access,
-                              String name,
-                              String signature,
-                              String superName,
-                              String[] interfaces) {
+        // Pass 2: If found, actually inject the interface
+        if (foundInterface[0] != null) {
+            ClassWriter writer = new ClassWriter(0);
+            String targetInterface = foundInterface[0];
 
-                className = name;
-
-                if (iface != null) {
-
-                    String internal = iface.replace('.', '/');
-
-                    if (interfaces == null) {
-                        interfaces = new String[0];
+            reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+                @Override
+                public void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
+                    // Check if class already has the interface
+                    boolean exists = false;
+                    for (String itf : interfaces) {
+                        if (itf.equals(targetInterface)) {
+                            exists = true;
+                            break;
+                        }
                     }
 
-                    boolean alreadyPresent = Arrays.asList(interfaces)
-                            .contains(internal);
+                    if (!exists) {
+                        String[] newInterfaces = new String[interfaces.length + 1];
+                        System.arraycopy(interfaces, 0, newInterfaces, 0, interfaces.length);
+                        newInterfaces[interfaces.length] = targetInterface;
 
-                    if (alreadyPresent) {
-                        CandleLightPlugin.log(project,
-                                " = skipping " + className.replace('/', '.')
-                                        + " (already implements " + iface + ")");
+                        CandleLightPlugin.log(project, " Added OptionalInterface [" +
+                                targetInterface.replace('/', '.') + "] to class: " + name.replace('/', '.'));
+
+                        super.visit(version, access, name, signature, superName, newInterfaces);
                     } else {
-                        String[] newInterfaces =
-                                Arrays.copyOf(interfaces, interfaces.length + 1);
-
-                        newInterfaces[interfaces.length] = internal;
-
-                        interfaces = newInterfaces;
-                        modified = true;
-
-                        CandleLightPlugin.log(project,
-                                " + injecting interface " + iface +
-                                        " into " + className.replace('/', '.'));
+                        super.visit(version, access, name, signature, superName, interfaces);
                     }
                 }
+            }, 0);
+            return writer.toByteArray();
+        }
 
-                super.visit(version, access, name, signature, superName, interfaces);
-            }
+        return input;
+    }
+    private byte[] addInterface(byte[] input, String newItf, Project project) {
+        ClassReader reader = new ClassReader(input);
+        ClassWriter writer = new ClassWriter(0); // No need for MAXS if just changing header
 
+        reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
             @Override
-            public void visitEnd() {
+            public void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
+                if (!Arrays.asList(interfaces).contains(newItf)) {
+                    String[] newInterfaces = new String[interfaces.length + 1];
+                    System.arraycopy(interfaces, 0, newInterfaces, 0, interfaces.length);
+                    newInterfaces[interfaces.length] = newItf;
 
-                if (!annotated) {
-                } else if (iface == null) {
-                    CandleLightPlugin.log(project,
-                            " ! OptionalInterface missing value on " +
-                                    className.replace('/', '.'));
+                    CandleLightPlugin.log(project, " Added OptionalInterface [" +
+                            newItf.replace('/', '.') + "] to class: " + name.replace('/', '.'));
+
+                    super.visit(version, access, name, signature, superName, newInterfaces);
+                } else {
+                    super.visit(version, access, name, signature, superName, interfaces);
                 }
-
-                if (modified) {
-                    CandleLightPlugin.log(project,
-                            " ✓ processed " + className.replace('/', '.'));
-                }
-
-                super.visitEnd();
             }
-        };
-
-        reader.accept(visitor, 0);
+        }, 0);
         return writer.toByteArray();
     }
 }
