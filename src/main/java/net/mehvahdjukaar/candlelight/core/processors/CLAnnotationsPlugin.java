@@ -1,6 +1,7 @@
 package net.mehvahdjukaar.candlelight.core.processors;
 
 import net.mehvahdjukaar.candlelight.core.CandleLightExtension;
+import net.mehvahdjukaar.candlelight.core.CandleLightPlugin;
 import net.mehvahdjukaar.candlelight.core.ClassUtils;
 import org.gradle.api.GradleException;
 import org.gradle.api.Project;
@@ -20,7 +21,7 @@ public class CLAnnotationsPlugin {
 
     private static final List<ClassProcessor> PROCESSORS = List.of(
             new BeanConventionProcessor(),
-            new OptionalInterfaceProcessor(),
+            //new OptionalInterfaceProcessor(),
             new PlatImplProcessor()
     );
 
@@ -31,20 +32,17 @@ public class CLAnnotationsPlugin {
             task.doLast(t -> {
 
                 File classesDir = task.getDestinationDirectory().get().getAsFile();
-
-                project.getLogger().lifecycle(
-                        "[Candlelight] Scanning classes in: " + classesDir
+                String relativePath = project.relativePath(classesDir);
+                CandleLightPlugin.log(project," Scanning classes in: " + relativePath
                 );
 
                 if (!classesDir.exists()) {
-                    project.getLogger().lifecycle(
-                            "[Candlelight] Classes directory does not exist: " + classesDir
-                    );
+                    CandleLightPlugin.log(project," Classes directory does not exist: " + relativePath);
                     return;
                 }
 
                 try {
-                    transformAll(classesDir, project);
+                    transformAll(classesDir, project, extension);
                 } catch (Exception e) {
                     throw new GradleException("Candlelight bytecode transformation failed", e);
                 }
@@ -52,7 +50,7 @@ public class CLAnnotationsPlugin {
         });
     }
 
-    public static void transformAll(File classesDir, Project project) throws IOException {
+    private static void transformAll(File classesDir, Project project, CandleLightExtension ext) throws IOException {
 
         ClassUtils.walkClasses(classesDir, file -> {
 
@@ -70,7 +68,7 @@ public class CLAnnotationsPlugin {
 
             for (ClassProcessor processor : PROCESSORS) {
 
-                byte[] result = processor.transform(modified, project);
+                byte[] result = processor.transform(modified, project, ext);
 
                 if (result != modified) {
                     changed = true;
@@ -83,8 +81,7 @@ public class CLAnnotationsPlugin {
             try {
                 writeAtomic(file.toPath(), modified);
 
-                project.getLogger().lifecycle(
-                        "[Candlelight] Patched class: " + file.getAbsolutePath()
+                CandleLightPlugin.log(project," Patched class: " + file.getName()
                 );
 
             } catch (IOException e) {

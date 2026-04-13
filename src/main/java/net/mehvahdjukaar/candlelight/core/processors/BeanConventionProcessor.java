@@ -1,10 +1,15 @@
 package net.mehvahdjukaar.candlelight.core.processors;
 
+import net.mehvahdjukaar.candlelight.core.CandleLightExtension;
+import net.mehvahdjukaar.candlelight.core.CandleLightPlugin;
 import net.mehvahdjukaar.candlelight.core.ClassUtils;
 import org.gradle.api.Project;
 import org.objectweb.asm.*;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 import static org.objectweb.asm.Opcodes.*;
 
@@ -19,12 +24,8 @@ public class BeanConventionProcessor implements ClassProcessor {
     private static final String BEAN_ALIAS_DESC =
             ClassUtils.toDescriptor("net.mehvahdjukaar.candlelight.api.BeanAlias");
 
-    public BeanConventionProcessor() {
-        this.project = project;
-    }
-
     @Override
-    public byte[] transform(byte[] classBytes, Project project) {
+    public byte[] transform(byte[] classBytes, Project project, CandleLightExtension ext) {
         ClassReader cr = new ClassReader(classBytes);
         ClassWriter cw = new ClassWriter(cr, ClassWriter.COMPUTE_MAXS);
         final boolean[] modified = {false};
@@ -106,9 +107,7 @@ public class BeanConventionProcessor implements ClassProcessor {
                     return;
                 }
 
-                project.getLogger().lifecycle(
-                        "[Candlelight] Generating getters for " + className.replace('/', '.')
-                );
+                CandleLightPlugin.log(project, " Generating getters for " + className.replace('/', '.'));
 
                 for (MethodData m : candidates) {
 
@@ -170,9 +169,8 @@ public class BeanConventionProcessor implements ClassProcessor {
                     mv.visitMaxs(0, 0);
                     mv.visitEnd();
 
-                    project.getLogger().lifecycle(
-                            "[Candlelight]  + generated " +
-                                    (isGetter ? "getter" : "setter") + ": " + alias
+                    CandleLightPlugin.log(project, "  + generated " +
+                            (isGetter ? "getter" : "setter") + ": " + alias
                     );
 
                     modified[0] = true;

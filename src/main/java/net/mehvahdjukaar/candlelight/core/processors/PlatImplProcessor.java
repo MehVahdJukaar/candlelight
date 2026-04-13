@@ -1,5 +1,7 @@
 package net.mehvahdjukaar.candlelight.core.processors;
 
+import net.mehvahdjukaar.candlelight.core.CandleLightExtension;
+import net.mehvahdjukaar.candlelight.core.CandleLightPlugin;
 import net.mehvahdjukaar.candlelight.core.ClassUtils;
 import org.gradle.api.Project;
 import org.objectweb.asm.*;
@@ -10,7 +12,7 @@ public class PlatImplProcessor implements ClassProcessor {
     private static final String FLAVOUR_ANNOTATION_DESC = ClassUtils.toDescriptor("net.mehvahdjukaar.candlelight.api.PlatformImpl");
 
     @Override
-    public byte[] transform(byte[] classBytes, Project project) {
+    public byte[] transform(byte[] classBytes, Project project, CandleLightExtension ext) {
 
         ClassReader cr = new ClassReader(classBytes);
         ClassWriter cw = new ClassWriter(cr, ClassWriter.COMPUTE_MAXS);
@@ -36,7 +38,7 @@ public class PlatImplProcessor implements ClassProcessor {
                     public AnnotationVisitor visitAnnotation(String annotationDesc, boolean visible) {
                         if (FLAVOUR_ANNOTATION_DESC.equals(annotationDesc)) {
                             isFlavour = true;
-                            project.getLogger().lifecycle("[Candlelight]  Found @Flavour method: " +
+                            CandleLightPlugin.log(project,"  Found @PlatformImpl method: " +
                                     className.replace('/', '.') + "#" + name + desc);
                         }
                         return super.visitAnnotation(annotationDesc, visible);
@@ -47,8 +49,8 @@ public class PlatImplProcessor implements ClassProcessor {
                         if (isFlavour) {
                             modified[0] = true;
 
-                            String implInternalName = computeImplInternalName(className);
-                            project.getLogger().lifecycle("[Candlelight]  Rewriting method to delegate to: " +
+                            String implInternalName = computeImplInternalName(className, ext.platformPackage());
+                            CandleLightPlugin.log(project,"  Rewriting method to delegate to: " +
                                     implInternalName.replace('/', '.') + "#" + name + desc);
 
                             Type[] args = Type.getArgumentTypes(desc);
@@ -73,14 +75,14 @@ public class PlatImplProcessor implements ClassProcessor {
         return modified[0] ? cw.toByteArray() : classBytes;
     }
 
-    private static String computeImplInternalName(String originalInternalName) {
+    private static String computeImplInternalName(String originalInternalName, String platFolder) {
         int lastSlash = originalInternalName.lastIndexOf('/');
         String pkg = lastSlash >= 0 ? originalInternalName.substring(0, lastSlash) : "";
         String simple = lastSlash >= 0 ? originalInternalName.substring(lastSlash + 1) : originalInternalName;
 
         return pkg.isEmpty()
-                ? "platform/" + simple + "Impl"
-                : pkg + "/platform/" + simple + "Impl";
+                ? platFolder+"/" + simple + "Impl"
+                : pkg + "/"+platFolder+"/" + simple + "Impl";
     }
 }
 
