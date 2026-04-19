@@ -3,7 +3,9 @@ package net.mehvahdjukaar.candlelight.core;
 import net.mehvahdjukaar.candlelight.core.jars_processors.ClientOnlyTransformPlugin;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
+import org.gradle.api.file.Directory;
 import org.gradle.api.plugins.JavaPluginExtension;
+import org.gradle.api.provider.Provider;
 import org.gradle.api.tasks.compile.JavaCompile;
 import org.gradle.jvm.tasks.Jar;
 
@@ -14,38 +16,85 @@ public class CandleLightPlugin implements Plugin<Project> {
     public static void log(Project project, String s) {
         project.getLogger().lifecycle(PREFIX + s);
     }
+
     @Override
     public void apply(Project project) {
-        CandleLightExtension extension = project.getExtensions()
+
+        CandleLightExtension clExtension = project.getExtensions()
                 .create("candlelight", CandleLightExtension.class);
 
-        extension.getPlatformPackage().convention("platform");
-        extension.getLogging().convention(true);
-        extension.getClientOnly().convention(false);
+        clExtension.getPlatformPackage().convention("platform");
+        clExtension.getLogging().convention(true);
+        clExtension.getClientOnly().convention(false);
 
-        ClientOnlyTransformPlugin.apply(project, extension);
+
+        ClientOnlyTransformPlugin.apply(project, clExtension);
+
 
         project.getPlugins().withId("java", plugin -> {
-            JavaCompile compileTask = (JavaCompile) project.getTasks().getByName("compileJava");
-            var mainSourceSet = project.getExtensions().getByType(JavaPluginExtension.class)
-                    .getSourceSets().getByName("main");
 
-            // Define the transformation task
-            var transformTask = project.getTasks().register("candleLightTransform", TransformClassesTask.class, t -> {
-                t.getSourceDir().set(compileTask.getDestinationDirectory());
-                t.getOutputDir().set(project.getLayout().getBuildDirectory().dir("transformed/classes"));
-                t.getExtensionProperty().set(extension);
+            JavaCompile compileTask =
+                    (JavaCompile) project.getTasks().getByName("compileJava");
+
+            // =====================================
+            // 1. MOVE compile output FIRST (safe)
+            // =====================================
+            Provider<Directory> rawDir =
+                    project.getLayout().getBuildDirectory().dir("raw/classes");
+
+            Provider<Directory> finalDir =
+                    project.getLayout().getBuildDirectory().dir("classes/java/main");
+
+            compileTask.getDestinationDirectory().set(rawDir);
+
+            // =====================================
+            // 2. TRANSFORM TASK (no cycle)
+            // =====================================
+            var transformTask = project.getTasks().register(
+                    "candleLightTransform",
+                    TransformClassesTask.class,
+                    t -> {
+
+                        // read compiled raw output
+                        t.getSourceDir().set(rawDir);
+
+                        // write FINAL runtime output
+                        t.getOutputDir().set(finalDir);
+
+                        t.getExtensionProperty().set(clExtension);
+
+                        t.dependsOn(compileTask);
+                    }
+            );
+
+            // =====================================
+            // 3. ensure ordering
+            // =====================================
+            project.getTasks().named("classes", task -> {
+                task.dependsOn(transformTask);
             });
 
-            // Redirect the JAR task
-            project.getTasks().named("jar", Jar.class, jar -> {
-                // This removes the default classes directory from the Jar's root
-                jar.exclude(element -> element.getFile().getAbsolutePath()
-                        .contains(compileTask.getDestinationDirectory().get().getAsFile().getAbsolutePath()));
+            if (project.getName().equals("fabric")) {
 
-                // This adds your transformed classes
-                jar.from(transformTask);
-            });
+                project.getTasks().named("compileJava", t -> {
+                    t.dependsOn(
+                            project.project(":common")
+                                    .getTasks()
+                                    .named("candleLightTransform")
+                    );
+                });
+            }
+
+            if (project.getName().equals("neoforge")) {
+
+                project.getTasks().named("compileJava", t -> {
+                    t.dependsOn(
+                            project.project(":common")
+                                    .getTasks()
+                                    .named("candleLightTransform")
+                    );
+                });
+            }
 
         });
     }

@@ -5,6 +5,7 @@ import org.gradle.api.DefaultTask;
 import org.gradle.api.file.DirectoryProperty;
 import org.gradle.api.provider.Property;
 import org.gradle.api.tasks.*;
+import org.gradle.internal.impldep.com.google.common.base.Stopwatch;
 import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.*;
 
@@ -17,8 +18,8 @@ import java.util.List;
 public abstract class TransformClassesTask extends DefaultTask {
 
     private static final List<ClassProcessor> PROCESSORS = List.of(
-            new BeanConventionProcessor(),
-            new OptionalInterfaceProcessor(),
+           // new BeanConventionProcessor()
+          //  new OptionalInterfaceProcessor(),
             new PlatImplProcessor()
     );
 
@@ -40,6 +41,7 @@ public abstract class TransformClassesTask extends DefaultTask {
 
     @TaskAction
     public void execute() throws IOException {
+        long startMillis = System.currentTimeMillis();
 
         File inputDir = getSourceDir().get().getAsFile();
         File outputDir = getOutputDir().get().getAsFile();
@@ -58,7 +60,7 @@ public abstract class TransformClassesTask extends DefaultTask {
                 byte[] outputBytes = transform(inputBytes);
 
                 if (outputBytes != null) {
-                    CandleLightPlugin.log(getProject(), " processed: " + relative);
+                    CandleLightPlugin.log(getProject(), " transformed: " + relative);
                 }else outputBytes = inputBytes;
                 Files.write(outFile.toPath(), outputBytes);
 
@@ -67,6 +69,12 @@ public abstract class TransformClassesTask extends DefaultTask {
                 throw new RuntimeException("Failed processing " + file, e);
             }
         });
+
+        long endMillis = System.currentTimeMillis();
+        long elapsedMillis = endMillis - startMillis;
+        CandleLightPlugin.log(getProject(), String.format(
+                "Transformation finished in %d ms", elapsedMillis
+        ));
     }
 
     private byte @Nullable [] transform(byte[] input) {
