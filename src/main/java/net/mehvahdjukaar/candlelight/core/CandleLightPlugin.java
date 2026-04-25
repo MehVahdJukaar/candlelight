@@ -74,6 +74,24 @@ public class CandleLightPlugin implements Plugin<Project> {
                 task.dependsOn(transformTask);
             });
 
+            project.getTasks().configureEach(task -> {
+                String taskName = task.getName();
+                if (taskName.contains("remapSourcesJar") || taskName.contains("remapJar")) {
+                    task.dependsOn(transformTask);
+                    project.getRootProject().getChildProjects().values().forEach(p -> {
+                        if (p.getName().equals("common")) {
+                            task.dependsOn(p.getTasks().named("candleLightTransform"));
+                        }
+                    });
+                }
+                if (taskName.equals("copyAccessTransformersPublications")) {
+                    task.dependsOn(project.getTasks().named("transformAccessWidener"));
+                }
+                if (taskName.equals("curseforge")) {
+                    task.dependsOn(project.getTasks().named("jar"));
+                }
+            });
+
             if (project.getName().equals("fabric")) {
 
                 project.getTasks().named("compileJava", t -> {
