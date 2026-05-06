@@ -88,6 +88,7 @@ public class CandleLightPlugin implements Plugin<Project> {
                 }
                 if (taskName.equals("curseforge")) {
                     task.dependsOn(project.getTasks().named("jar"));
+                    task.dependsOn(project.getTasks().named("remapJar"));
                 }
             });
 
