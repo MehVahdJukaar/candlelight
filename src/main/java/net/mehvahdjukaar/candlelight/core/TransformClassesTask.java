@@ -3,6 +3,7 @@ package net.mehvahdjukaar.candlelight.core;
 import net.mehvahdjukaar.candlelight.core.processors.*;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.file.DirectoryProperty;
+import org.gradle.api.file.FileTree;
 import org.gradle.api.provider.Property;
 import org.gradle.api.tasks.*;
 import org.gradle.internal.impldep.com.google.common.base.Stopwatch;
@@ -29,9 +30,15 @@ public abstract class TransformClassesTask extends DefaultTask {
             .toList();
 
 
-    @InputDirectory
-    @PathSensitive(PathSensitivity.RELATIVE)
+    @Internal
     public abstract DirectoryProperty getSourceDir();
+
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    @SkipWhenEmpty
+    public FileTree getSourceFiles() {
+        return getSourceDir().getAsFileTree();
+    }
 
     @OutputDirectory
     public abstract DirectoryProperty getOutputDir();
