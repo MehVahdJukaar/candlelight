@@ -3,11 +3,16 @@ package net.mehvahdjukaar.candlelight.core;
 import net.mehvahdjukaar.candlelight.core.jars_processors.ClientOnlyTransformPlugin;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
+import org.gradle.api.Task;
 import org.gradle.api.file.Directory;
 import org.gradle.api.provider.Provider;
+import org.gradle.api.tasks.TaskProvider;
 import org.gradle.api.tasks.compile.JavaCompile;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
 
 public class CandleLightPlugin implements Plugin<Project> {
 
@@ -60,6 +65,86 @@ public class CandleLightPlugin implements Plugin<Project> {
                 }
             });
         });
+
+        if (project == project.getRootProject()) {
+            registerAggregatorTasks(project);
+        } else {
+            // Ensure aggregator tasks are registered on the root project even when
+            // the plugin is applied only via `subprojects { apply plugin: ... }`.
+            // Re-applying the plugin is a no-op thanks to Gradle's de-duplication.
+            project.getRootProject().getPlugins().apply(CandleLightPlugin.class);
+        }
+    }
+
+    private void registerAggregatorTasks(Project root) {
+        TaskProvider<Task> cleanAll = root.getTasks().register("cleanAll", t -> {
+            t.setGroup("build");
+            t.setDescription("Cleans all subprojects atomically.");
+            t.dependsOn(subprojectTaskPaths(root, "clean"));
+        });
+
+        TaskProvider<Task> buildAll = root.getTasks().register("buildAll", t -> {
+            t.setGroup("build");
+            t.setDescription("Builds all subprojects. Runs only after cleanAll succeeds when both are scheduled.");
+            t.dependsOn(subprojectTaskPaths(root, "build"));
+            t.mustRunAfter(cleanAll);
+        });
+
+        TaskProvider<Task> platformPublishAll = root.getTasks().register("platformPublishAll", t -> {
+            t.setGroup("build");
+            t.setDescription("Uploads all subprojects to CurseForge and Modrinth.");
+            t.dependsOn((Callable<List<Object>>) () -> {
+                List<Object> deps = new ArrayList<>();
+                for (Project sp : root.getSubprojects()) {
+                    if (sp.getTasks().findByName("curseforge") != null) {
+                        deps.add(sp.getTasks().named("curseforge"));
+                    }
+                    if (sp.getTasks().findByName("modrinth") != null) {
+                        deps.add(sp.getTasks().named("modrinth"));
+                    }
+                }
+                return deps;
+            });
+            t.mustRunAfter(buildAll);
+        });
+
+        TaskProvider<GitTagTask> gitTag = root.getTasks().register("gitTag", GitTagTask.class, t -> {
+            t.setGroup("publishing");
+            t.setDescription("Creates and pushes a git tag matching the root project's mod_version.");
+            t.getTag().convention(root.provider(() -> {
+                Object v = root.findProperty("mod_version");
+                if (v == null) {
+                    throw new IllegalStateException(
+                            "gitTag: root project property 'mod_version' is not set. " +
+                                    "Override via gitTag { tag.set(\"...\") } if you use a different property.");
+                }
+                return v.toString();
+            }));
+            t.mustRunAfter(platformPublishAll);
+        });
+
+        // Ensure root's `publish` (if present) is ordered after gitTag.
+        root.getTasks().configureEach(task -> {
+            if (task.getName().equals("publish")) {
+                task.mustRunAfter(gitTag);
+            }
+        });
+
+        root.getTasks().register("buildAndPublishAll", t -> {
+            t.setGroup("publishing");
+            t.setDescription("Full release pipeline: cleanAll -> buildAll -> platformPublishAll -> gitTag -> publish. Each step runs only if the previous succeeded.");
+            t.dependsOn(cleanAll, buildAll, platformPublishAll, gitTag, "publish");
+        });
+    }
+
+    private static Callable<List<String>> subprojectTaskPaths(Project root, String taskName) {
+        return () -> {
+            List<String> paths = new ArrayList<>();
+            for (Project sp : root.getSubprojects()) {
+                paths.add(sp.getPath() + ":" + taskName);
+            }
+            return paths;
+        };
     }
 
     private void transformCompileTask(Project project, JavaCompile compileTask, @Nullable String key) {
