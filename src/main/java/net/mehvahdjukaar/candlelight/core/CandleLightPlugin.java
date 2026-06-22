@@ -6,6 +6,7 @@ import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.file.Directory;
 import org.gradle.api.provider.Provider;
+import org.gradle.api.publish.tasks.GenerateModuleMetadata;
 import org.gradle.api.tasks.TaskProvider;
 import org.gradle.api.tasks.compile.JavaCompile;
 
@@ -35,6 +36,7 @@ public class CandleLightPlugin implements Plugin<Project> {
 
 
         ClientOnlyTransformPlugin.apply(project, clExtension);
+        configureNeoForgeModuleMetadata(project);
 
         project.getPlugins().withId("java", plugin -> {
             transformCompileTask(
@@ -90,19 +92,19 @@ public class CandleLightPlugin implements Plugin<Project> {
             t.mustRunAfter(cleanAll);
         });
 
-        TaskProvider<Task> platformPublishAll = root.getTasks().register("platformPublishAll", t -> {
-            t.setGroup("build");
-            t.setDescription("Uploads all subprojects to CurseForge and Modrinth.");
+        // Depend on the root-level `:curseforge` and `:modrinth` aggregators created by the
+        // helper plugin via addUploadTask(...). We deliberately do NOT depend on `:upload`,
+        // because helper's `:upload` also depends on `:publish` — pulling that into our chain
+        // creates a cycle once `publish.mustRunAfter(gitTag)` is applied.
+        TaskProvider<Task> uploadAll = root.getTasks().register("uploadAll", t -> {
+            t.setGroup("publishing");
+            t.setDescription("Uploads all subprojects to CurseForge and Modrinth (excludes maven publish).");
             t.dependsOn((Callable<List<Object>>) () -> {
                 List<Object> deps = new ArrayList<>();
-                for (Project sp : root.getSubprojects()) {
-                    if (sp.getTasks().findByName("curseforge") != null) {
-                        deps.add(sp.getTasks().named("curseforge"));
-                    }
-                    if (sp.getTasks().findByName("modrinth") != null) {
-                        deps.add(sp.getTasks().named("modrinth"));
-                    }
-                }
+                Task cf = root.getTasks().findByName("curseforge");
+                if (cf != null) deps.add(cf);
+                Task mr = root.getTasks().findByName("modrinth");
+                if (mr != null) deps.add(mr);
                 return deps;
             });
             t.mustRunAfter(buildAll);
@@ -120,7 +122,7 @@ public class CandleLightPlugin implements Plugin<Project> {
                 }
                 return v.toString();
             }));
-            t.mustRunAfter(platformPublishAll);
+            t.mustRunAfter(uploadAll);
         });
 
         // Ensure root's `publish` (if present) is ordered after gitTag.
@@ -131,9 +133,9 @@ public class CandleLightPlugin implements Plugin<Project> {
         });
 
         root.getTasks().register("buildAndPublishAll", t -> {
-            t.setGroup("publishing");
-            t.setDescription("Full release pipeline: cleanAll -> buildAll -> platformPublishAll -> gitTag -> publish. Each step runs only if the previous succeeded.");
-            t.dependsOn(cleanAll, buildAll, platformPublishAll, gitTag, "publish");
+            t.setGroup("build");
+            t.setDescription("Full release pipeline: cleanAll -> buildAll -> uploadAll -> gitTag -> publish. Each step runs only if the previous succeeded.");
+            t.dependsOn(cleanAll, buildAll, uploadAll, gitTag, "publish");
         });
     }
 
@@ -226,6 +228,36 @@ public class CandleLightPlugin implements Plugin<Project> {
 
     private static String capitalize(String input) {
         return input.substring(0, 1).toUpperCase() + input.substring(1);
+    }
+
+    private void configureNeoForgeModuleMetadata(Project project) {
+        if (!"neoforge".equals(project.getName())) {
+            return;
+        }
+
+        project.getPlugins().withId("maven-publish", plugin -> project.afterEvaluate(p -> {
+            TaskProvider<EnsureAccessTransformerModuleMetadataTask> ensureTask = p.getTasks().register(
+                    "candleEnsureAccessTransformerModuleMetadata",
+                    EnsureAccessTransformerModuleMetadataTask.class,
+                    task -> task.getAccessTransformerSources().from(
+                            p.getLayout().getBuildDirectory().dir("copyAccessTransformersPublications"),
+                            p.getLayout().getBuildDirectory().file("generated/accesstransformer.cfg")
+                    )
+            );
+
+            p.getTasks().withType(GenerateModuleMetadata.class).configureEach(generateTask ->
+                    ensureTask.configure(task -> task.getModuleFile().set(generateTask.getOutputFile()))
+            );
+
+            Task modifyTask = p.getTasks().findByName("modifyMetadataFile");
+            if (modifyTask != null) {
+                modifyTask.finalizedBy(ensureTask);
+            } else {
+                p.getTasks().withType(GenerateModuleMetadata.class).configureEach(generateTask ->
+                        generateTask.finalizedBy(ensureTask)
+                );
+            }
+        }));
     }
 
 }
