@@ -42,8 +42,6 @@ public abstract class GitTagTask extends DefaultTask {
         getExecOperations().exec(spec ->
                 spec.commandLine("git", "tag", "-a", tag, "-m", "Release " + tag)
         );
-        getExecOperations().exec(spec ->
-                spec.commandLine("git", "push", "origin", tag)
-        );
+        getLogger().lifecycle("Created local git tag '{}'. It will be pushed with your next 'git push --follow-tags'.", tag);
     }
 }

@@ -112,7 +112,7 @@ public class CandleLightPlugin implements Plugin<Project> {
 
         TaskProvider<GitTagTask> gitTag = root.getTasks().register("gitTag", GitTagTask.class, t -> {
             t.setGroup("publishing");
-            t.setDescription("Creates and pushes a git tag matching the root project's mod_version.");
+            t.setDescription("Creates a local git tag matching the root project's mod_version (pushed with your next 'git push --follow-tags').");
             t.getTag().convention(root.provider(() -> {
                 Object v = root.findProperty("mod_version");
                 if (v == null) {
@@ -131,6 +131,26 @@ public class CandleLightPlugin implements Plugin<Project> {
                 task.mustRunAfter(gitTag);
             }
         });
+
+        // Gate EVERY real upload/publish task (in every project, not just the
+        // aggregator wrappers) so it cannot start until the COMPLETE buildAll —
+        // i.e. every loader's build/compile — has succeeded.
+        //
+        // mustRunAfter(buildAll) placed on the `uploadAll`/`gitTag` wrappers does
+        // NOT propagate to their dependencies: Gradle ordering constraints are not
+        // transitive down a dependsOn edge. Without this, the only constraints on
+        // e.g. `:neoforge:curseforge` are its own narrow chain (compile -> jar ->
+        // curseforge), so the parallel scheduler is free to run it to completion —
+        // uploading! — while `:fabric:compileJava` is still running. If fabric then
+        // fails, neoforge has already been published. Ordering the leaf tasks after
+        // buildAll means no upload/publish can begin until all loaders have built,
+        // so a failure in any loader aborts (fail-fast mode) before anything ships.
+        root.allprojects(p -> p.getTasks().configureEach(task -> {
+            String name = task.getName();
+            if (name.equals("curseforge") || name.equals("modrinth") || name.startsWith("publish")) {
+                task.mustRunAfter(buildAll);
+            }
+        }));
 
         root.getTasks().register("buildAndPublishAll", t -> {
             t.setGroup("build");
@@ -245,15 +265,25 @@ public class CandleLightPlugin implements Plugin<Project> {
                     )
             );
 
-            p.getTasks().withType(GenerateModuleMetadata.class).configureEach(generateTask ->
-                    ensureTask.configure(task -> task.getModuleFile().set(generateTask.getOutputFile()))
-            );
+            var moduleMetadataTasks = p.getTasks().withType(GenerateModuleMetadata.class);
+
+            // Set ensureTask's input lazily via a value provider instead of calling
+            // ensureTask.configure(...) from inside a configureEach: under Gradle 9 that
+            // throws "NamedDomainObjectProvider.configure(Action) on task set cannot be
+            // executed in the current context". Resolving the file lazily also keeps this
+            // tolerant of afterEvaluate ordering between us and the publishing plugin.
+            ensureTask.configure(task -> task.getModuleFile().fileProvider(p.provider(() -> {
+                for (GenerateModuleMetadata generateTask : moduleMetadataTasks) {
+                    return generateTask.getOutputFile().get().getAsFile();
+                }
+                return null;
+            })));
 
             Task modifyTask = p.getTasks().findByName("modifyMetadataFile");
             if (modifyTask != null) {
                 modifyTask.finalizedBy(ensureTask);
             } else {
-                p.getTasks().withType(GenerateModuleMetadata.class).configureEach(generateTask ->
+                moduleMetadataTasks.configureEach(generateTask ->
                         generateTask.finalizedBy(ensureTask)
                 );
             }
