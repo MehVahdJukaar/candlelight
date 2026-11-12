@@ -5,11 +5,13 @@ import org.gradle.api.provider.Property;
 import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.TaskAction;
 import org.gradle.process.ExecOperations;
+import org.gradle.work.DisableCachingByDefault;
 
 import javax.inject.Inject;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 
+@DisableCachingByDefault(because = "Creates a git tag as a side effect; nothing to cache")
 public abstract class GitTagTask extends DefaultTask {
 
     @Inject

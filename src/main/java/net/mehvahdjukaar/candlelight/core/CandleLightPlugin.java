@@ -1,6 +1,7 @@
 package net.mehvahdjukaar.candlelight.core;
 
 import net.mehvahdjukaar.candlelight.core.jars_processors.ClientOnlyTransformPlugin;
+import net.mehvahdjukaar.candlelight.core.jars_processors.StripLoomVersionPlugin;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
@@ -33,9 +34,11 @@ public class CandleLightPlugin implements Plugin<Project> {
 
         clExtension.getLogging().convention(true);
         clExtension.getClientOnly().convention(true);
+        clExtension.getStripLoomVersion().convention(false);
 
 
         ClientOnlyTransformPlugin.apply(project, clExtension);
+        StripLoomVersionPlugin.apply(project, clExtension);
         configureNeoForgeModuleMetadata(project);
 
         project.getPlugins().withId("java", plugin -> {
@@ -154,8 +157,8 @@ public class CandleLightPlugin implements Plugin<Project> {
 
         root.getTasks().register("buildAndPublishAll", t -> {
             t.setGroup("build");
-            t.setDescription("Full release pipeline: cleanAll -> buildAll -> uploadAll -> gitTag -> publish. Each step runs only if the previous succeeded.");
-            t.dependsOn(cleanAll, buildAll, uploadAll, gitTag, "publish");
+            t.setDescription("Full release pipeline: cleanAll -> buildAll -> uploadAll -> publish. Each step runs only if the previous succeeded.");
+            t.dependsOn(cleanAll, buildAll, uploadAll, "publish");
         });
     }
 

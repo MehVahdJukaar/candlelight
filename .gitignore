@@ -38,8 +38,3 @@ bin/
 
 ### Mac OS ###
 .DS_Store
-# AI agent / assistant config (local only, not on GitHub)
-.claude/
-.cursor/
-.junie/
-CLAUDE.md
